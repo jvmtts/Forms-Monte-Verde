@@ -14,18 +14,19 @@ npm run dev
 ```bash
 npm run lint
 npm run build
+node --test tests/protocol.test.js
 ```
 
 ## Integração com o Basin
 
 O formulário já está preparado para enviar os dados e os documentos diretamente ao Basin. A geração do contrato não faz parte desta etapa.
 
-Para testar localmente, copie `.env.example` para `.env` e substitua o valor pelo endpoint criado no painel do Basin:
+O endpoint `https://usebasin.com/f/52f4bd4c726f` já está configurado no projeto. Não é necessário cadastrar `VITE_BASIN_ENDPOINT` na Vercel.
 
-```env
-VITE_BASIN_ENDPOINT=https://usebasin.com/f/SEU_FORM_ID
-```
+O envio usa `multipart/form-data`, mantém os documentos em seus formatos originais e apresenta os campos no painel do Basin com nomes legíveis. O protocolo (001, 002, 003...) aparece na confirmação e no campo **Protocolo da inscrição** de cada novo registro no Basin. O assunto do envio também inclui esse número. Inscrições já recebidas não são alteradas nem renumeradas.
 
-Na hospedagem, cadastre a mesma variável de ambiente e publique novamente o projeto. Como as variáveis do Vite são aplicadas durante a compilação, uma nova publicação é necessária sempre que o endpoint for alterado.
+## Contador de protocolos
 
-O envio usa `multipart/form-data`, mantém os documentos em seus formatos originais e apresenta os campos no painel do Basin com nomes legíveis. Sem um endpoint válido configurado, nenhum dado é enviado.
+A API `/api/protocol` usa um contador atômico no Redis, separado pela chave `monte-verde-2026`. No projeto da Vercel, associe um banco Upstash Redis e disponibilize `KV_REST_API_URL` e `KV_REST_API_TOKEN` (ou `UPSTASH_REDIS_REST_URL` e `UPSTASH_REDIS_REST_TOKEN`) para a função. Sem essa integração, o formulário não envia dados ao Basin: exibe um erro e permite tentar novamente.
+
+Em desenvolvimento local, `npm run dev` executa apenas o Vite e não disponibiliza a função `/api/protocol`. Use uma implantação de prévia na Vercel para testar a inscrição completa. Um teste real reserva um número; se quiser preservar o 001 para a primeira inscrição da edição, não envie um formulário de teste.

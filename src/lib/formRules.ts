@@ -1,4 +1,5 @@
 import type { FormErrors, FormValues } from '../types/expeditionForm'
+import { validateCompanions } from './companionRules'
 
 export const FIELD_LIMITS = {
   nome: 120,
@@ -134,7 +135,6 @@ function isValidFutureOrToday(value: string) {
 export function validatePersonal(values: FormValues) {
   const errors: FormErrors = {}
 
-  if (!values.tipoInscricao) errors.tipoInscricao = 'Selecione o tipo de inscrição.'
   if (!isValidPersonName(values.nomeCompleto)) errors.nomeCompleto = 'Informe nome e sobrenome, sem números ou símbolos indevidos.'
   if (!isValidCpf(values.cpf)) errors.cpf = 'Informe um CPF válido com 11 dígitos.'
   if (!/^\d{5,14}$/.test(values.rg)) errors.rg = 'Informe um RG com 5 a 14 números.'
@@ -150,12 +150,7 @@ export function validatePersonal(values: FormValues) {
   if (values.cidade.trim().length < 2) errors.cidade = 'Informe uma cidade válida.'
   if (!values.estado) errors.estado = 'Selecione o estado.'
 
-  if (values.tipoInscricao === 'dupla') {
-    if (!isValidPersonName(values.nomeAcompanhante)) errors.nomeAcompanhante = 'Informe nome e sobrenome do acompanhante.'
-    if (!/^\d{5,14}$/.test(values.rgAcompanhante)) errors.rgAcompanhante = 'Informe um RG com 5 a 14 números.'
-    if (!isValidBirthDate(values.dataNascimentoAcompanhante)) errors.dataNascimentoAcompanhante = 'Informe uma data de nascimento válida.'
-    if (!values.tamanhoCamisetaAcompanhante) errors.tamanhoCamisetaAcompanhante = 'Selecione o tamanho da camiseta.'
-  }
+  Object.assign(errors, validateCompanions(values.acompanhantes))
 
   return errors
 }

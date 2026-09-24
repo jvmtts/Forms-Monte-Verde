@@ -28,7 +28,9 @@ import {
   validatePersonal,
 } from '../lib/formRules'
 import { initialValues } from '../types/expeditionForm'
-import type { FormErrors, FormValues, RegistrationType, RentalPreference, Step, VehicleMode, VehicleType } from '../types/expeditionForm'
+import { CompanionsSection } from './CompanionsSection'
+import { appendCompanions } from '../lib/companionRules'
+import type { Companion, FormErrors, FormValues, RentalPreference, Step, VehicleMode, VehicleType } from '../types/expeditionForm'
 
 const states = [
   'AC', 'AL', 'AP', 'AM', 'BA', 'CE', 'DF', 'ES', 'GO', 'MA', 'MT', 'MS',
@@ -42,8 +44,9 @@ const steps = [
   { label: 'Revisão', icon: FileCheck2 },
 ]
 
-const BASIN_ENDPOINT = import.meta.env.VITE_BASIN_ENDPOINT?.trim() ?? ''
+const BASIN_ENDPOINT = 'https://usebasin.com/f/52f4bd4c726f'
 const SUBMISSION_TIMEOUT_MS = 180_000
+const PROTOCOL_REQUEST_KEY = 'usina:monte-verde-2026:protocolo:solicitacao'
 
 function isValidBasinEndpoint(endpoint: string) {
   try {
@@ -61,12 +64,13 @@ function appendText(payload: FormData, label: string, value: string) {
   if (normalizedValue) payload.append(label, normalizedValue)
 }
 
-function createBasinPayload(values: FormValues) {
+function createBasinPayload(values: FormValues, protocol: string) {
   const payload = new FormData()
+  payload.append('Protocolo da inscrição', protocol)
 
-  payload.append('_subject', `Nova inscrição — ${values.nomeCompleto} (Expedição Monte Verde)`)
+  payload.append('_subject', `Nova inscrição ${protocol} — ${values.nomeCompleto} (Expedição Monte Verde)`)
   payload.append('Evento', 'Expedição Monte Verde — 6 a 8 de novembro de 2026')
-  payload.append('Tipo de inscrição', values.tipoInscricao === 'dupla' ? 'Piloto e acompanhante' : 'Piloto individual')
+  payload.append('Tipo de inscrição', values.acompanhantes.length ? 'Piloto e acompanhantes' : 'Piloto individual')
   appendText(payload, 'Nome completo', values.nomeCompleto)
   appendText(payload, 'CPF', values.cpf)
   appendText(payload, 'RG', values.rg)
@@ -81,12 +85,7 @@ function createBasinPayload(values: FormValues) {
   appendText(payload, 'Cidade', values.cidade)
   appendText(payload, 'Estado', values.estado)
 
-  if (values.tipoInscricao === 'dupla') {
-    appendText(payload, 'Acompanhante - Nome', values.nomeAcompanhante)
-    appendText(payload, 'Acompanhante - RG', values.rgAcompanhante)
-    appendText(payload, 'Acompanhante - Data de nascimento', values.dataNascimentoAcompanhante)
-    appendText(payload, 'Acompanhante - Tamanho da camiseta', values.tamanhoCamisetaAcompanhante)
-  }
+  appendCompanions(payload, values.acompanhantes)
 
   payload.append('Participação com veículo', values.modalidadeVeiculo === 'proprio' ? 'Veículo próprio' : 'Necessita locação')
   appendText(payload, 'Número da CNH', values.numeroCnh)
@@ -336,12 +335,15 @@ function ReviewRow({ label, value }: { label: string; value: string }) {
 
 export function ExpeditionForm() {
   const formTopRef = useRef<HTMLElement>(null)
+  const requestIdRef = useRef('')
+  const submittingRef = useRef(false)
   const [step, setStep] = useState<Step>(0)
   const [values, setValues] = useState<FormValues>(initialValues)
   const [errors, setErrors] = useState<FormErrors>({})
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState('')
   const [submitted, setSubmitted] = useState(false)
+  const [protocol, setProtocol] = useState('')
 
   const address = useMemo(
     () =>
@@ -364,23 +366,23 @@ export function ExpeditionForm() {
     setSubmitError('')
   }
 
-  const updateRegistrationType = (registrationType: RegistrationType) => {
-    setValues((current) => ({
+  const addCompanion = () => {
+    setValues((current) => current.acompanhantes.length >= 3 ? current : {
       ...current,
-      tipoInscricao: registrationType,
-      nomeAcompanhante: registrationType === 'individual' ? '' : current.nomeAcompanhante,
-      rgAcompanhante: registrationType === 'individual' ? '' : current.rgAcompanhante,
-      dataNascimentoAcompanhante: registrationType === 'individual' ? '' : current.dataNascimentoAcompanhante,
-      tamanhoCamisetaAcompanhante: registrationType === 'individual' ? '' : current.tamanhoCamisetaAcompanhante,
-    }))
-    setErrors((current) => ({
-      ...current,
-      tipoInscricao: undefined,
-      nomeAcompanhante: undefined,
-      rgAcompanhante: undefined,
-      dataNascimentoAcompanhante: undefined,
-      tamanhoCamisetaAcompanhante: undefined,
-    }))
+      acompanhantes: [...current.acompanhantes, { id: crypto.randomUUID(), nome: '', rg: '', dataNascimento: '', tamanhoCamiseta: '' }],
+    })
+  }
+
+  const updateCompanion = (id: string, field: keyof Omit<Companion, 'id'>, value: string) => {
+    const index = values.acompanhantes.findIndex((companion) => companion.id === id)
+    setValues((current) => ({ ...current, acompanhantes: current.acompanhantes.map((companion) => companion.id === id ? { ...companion, [field]: value } : companion) }))
+    if (index >= 0) setErrors((current) => ({ ...current, [`acompanhante-${index}-${field}`]: undefined }))
+    setSubmitError('')
+  }
+
+  const removeCompanion = (id: string) => {
+    setValues((current) => ({ ...current, acompanhantes: current.acompanhantes.filter((companion) => companion.id !== id) }))
+    setErrors((current) => Object.fromEntries(Object.entries(current).filter(([key]) => !key.startsWith('acompanhante-'))))
     setSubmitError('')
   }
 
@@ -442,6 +444,7 @@ export function ExpeditionForm() {
   }
 
   const submitForm = async () => {
+    if (submittingRef.current) return
     const personalErrors = validatePersonal(values)
     if (Object.keys(personalErrors).length > 0) {
       setStep(0)
@@ -468,15 +471,47 @@ export function ExpeditionForm() {
       return
     }
 
+    submittingRef.current = true
     setSubmitting(true)
     setSubmitError('')
     const controller = new AbortController()
     const timeoutId = window.setTimeout(() => controller.abort(), SUBMISSION_TIMEOUT_MS)
+    let failureStage: 'protocol' | 'basin' = 'protocol'
 
     try {
+      let requestId = requestIdRef.current
+      try {
+        requestId ||= window.sessionStorage.getItem(PROTOCOL_REQUEST_KEY) || ''
+      } catch {
+        // O ID continua disponível na memória se o navegador bloquear o armazenamento.
+      }
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(requestId)) {
+        requestId = window.crypto.randomUUID()
+      }
+      requestIdRef.current = requestId
+      try {
+        window.sessionStorage.setItem(PROTOCOL_REQUEST_KEY, requestId)
+      } catch {
+        // Armazenamento opcional: a referência mantém o ID durante esta visita.
+      }
+
+      const protocolResponse = await fetch('/api/protocol', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ requestId }),
+        signal: controller.signal,
+      })
+      if (!protocolResponse.ok) throw new Error('Falha ao gerar protocolo')
+      const protocolBody = await protocolResponse.json() as { protocol?: unknown }
+      if (typeof protocolBody.protocol !== 'string' || !/^\d{3,}$/.test(protocolBody.protocol)) {
+        throw new Error('Protocolo inválido')
+      }
+      const reservedProtocol = protocolBody.protocol
+
+      failureStage = 'basin'
       const response = await fetch(BASIN_ENDPOINT, {
         method: 'POST',
-        body: createBasinPayload(values),
+        body: createBasinPayload(values, reservedProtocol),
         headers: { Accept: 'application/json' },
         signal: controller.signal,
       })
@@ -494,17 +529,27 @@ export function ExpeditionForm() {
         throw new Error(responseMessage || `Falha no envio: ${response.status}`)
       }
 
+      setProtocol(reservedProtocol)
       setSubmitted(true)
+      try {
+        window.sessionStorage.removeItem(PROTOCOL_REQUEST_KEY)
+      } catch {
+        // O envio já foi concluído; a limpeza local não afeta o protocolo.
+      }
+      requestIdRef.current = ''
       scrollToForm()
     } catch (error) {
       const timedOut = error instanceof DOMException && error.name === 'AbortError'
       setSubmitError(
         timedOut
           ? 'O envio demorou mais do que o esperado. Verifique sua conexão e tente novamente.'
-          : 'Não foi possível enviar agora. Verifique sua conexão e tente novamente.',
+          : failureStage === 'protocol'
+            ? 'Não foi possível gerar o protocolo agora. Verifique sua conexão e tente novamente.'
+            : 'Não foi possível enviar agora. Verifique sua conexão e tente novamente.',
       )
     } finally {
       window.clearTimeout(timeoutId)
+      submittingRef.current = false
       setSubmitting(false)
     }
   }
@@ -516,6 +561,9 @@ export function ExpeditionForm() {
           <CheckCircle2 aria-hidden="true" className="mx-auto h-12 w-12 text-[#477a50]" />
           <p className="mt-6 font-mono text-[11px] font-bold uppercase tracking-[0.2em] text-[#3d7048]">Inscrição recebida</p>
           <h2 className="mt-3 font-display text-3xl font-bold">Dados enviados com sucesso.</h2>
+          <p className="mt-6 text-xs font-bold uppercase tracking-[0.14em] text-[#5e7077]">Seu protocolo</p>
+          <p className="mt-1 font-display text-4xl font-bold tracking-[-0.04em]" aria-label={`Protocolo ${protocol}`}>{protocol}</p>
+          <p className="mt-2 text-sm text-[#5e7077]">Guarde este número para identificar sua inscrição.</p>
           <p className="mx-auto mt-4 max-w-lg text-sm leading-6 text-[#6c7f72]">
             A equipe da Usina do Jet conferirá os dados da Expedição Monte Verde e entrará em contato pelo WhatsApp informado.
           </p>
@@ -574,23 +622,6 @@ export function ExpeditionForm() {
                 </div>
               </div>
 
-              <FieldShell id="tipoInscricao" label="Como será sua inscrição?" error={errors.tipoInscricao} required>
-                <div className="mb-8 grid gap-3 sm:grid-cols-2">
-                  {[
-                    ['individual', 'Piloto individual', 'Apenas o piloto'],
-                    ['dupla', 'Piloto e acompanhante', 'Inclui os dados do acompanhante'],
-                  ].map(([value, label, description]) => (
-                    <label className={`cursor-pointer rounded-xl border p-4 transition ${values.tipoInscricao === value ? 'border-[#477a50] bg-[#eef5ef] text-[#3d7048] ring-4 ring-[#477a50]/5' : 'border-[#d1ddd3] bg-[#fbfdfb] text-[#607467] hover:border-[#477a50]'}`} key={value}>
-                      <span className="flex items-center gap-3 text-sm font-semibold">
-                        <input checked={values.tipoInscricao === value} id={value === 'individual' ? 'tipoInscricao' : undefined} name="tipoInscricao" onChange={() => updateRegistrationType(value as RegistrationType)} type="radio" value={value} />
-                        {label}
-                      </span>
-                      <span className="ml-7 mt-1 block text-xs font-normal opacity-75">{description}</span>
-                    </label>
-                  ))}
-                </div>
-              </FieldShell>
-
               <div className="grid gap-x-6 gap-y-7 sm:grid-cols-2">
                 <div className="sm:col-span-2">
                   <TextField id="nomeCompleto" label="Nome completo" required autoComplete="name" maxLength={FIELD_LIMITS.nome} value={values.nomeCompleto} error={errors.nomeCompleto} onChange={(event) => updateField('nomeCompleto', limitText(event.target.value, FIELD_LIMITS.nome))} />
@@ -611,19 +642,7 @@ export function ExpeditionForm() {
                 <StateSelect value={values.estado} error={errors.estado} onChange={(value) => updateField('estado', value)} />
               </div>
 
-              {values.tipoInscricao === 'dupla' && (
-                <div className="mt-10 rounded-2xl border border-[#d9e5dc] bg-[#f7faf7] p-5 sm:p-6">
-                  <p className="mb-5 font-mono text-[10px] font-bold uppercase tracking-[0.18em] text-[#3d7048]">Dados do acompanhante</p>
-                  <div className="grid gap-x-6 gap-y-7 sm:grid-cols-2">
-                    <div className="sm:col-span-2">
-                      <TextField id="nomeAcompanhante" label="Nome completo" required maxLength={FIELD_LIMITS.nome} value={values.nomeAcompanhante} error={errors.nomeAcompanhante} onChange={(event) => updateField('nomeAcompanhante', limitText(event.target.value, FIELD_LIMITS.nome))} />
-                    </div>
-                    <TextField id="rgAcompanhante" label="RG" required inputMode="numeric" maxLength={FIELD_LIMITS.rg} value={values.rgAcompanhante} error={errors.rgAcompanhante} onChange={(event) => updateField('rgAcompanhante', onlyDigits(event.target.value).slice(0, FIELD_LIMITS.rg))} />
-                    <TextField id="dataNascimentoAcompanhante" label="Data de nascimento" required inputMode="numeric" maxLength={FIELD_LIMITS.data} placeholder="DD/MM/AAAA" value={values.dataNascimentoAcompanhante} error={errors.dataNascimentoAcompanhante} onChange={(event) => updateField('dataNascimentoAcompanhante', maskDate(event.target.value))} />
-                    <SelectField id="tamanhoCamisetaAcompanhante" label="Tamanho da camiseta" required value={values.tamanhoCamisetaAcompanhante} error={errors.tamanhoCamisetaAcompanhante} onChange={(event) => updateField('tamanhoCamisetaAcompanhante', event.target.value)} options={[{ value: '', label: 'Selecione' }, ...['PP', 'P', 'M', 'G', 'GG', 'XGG'].map((size) => ({ value: size, label: size }))]} />
-                  </div>
-                </div>
-              )}
+              <CompanionsSection companions={values.acompanhantes} errors={errors} accent="#477a50" onAdd={addCompanion} onRemove={removeCompanion} onChange={updateCompanion} />
             </div>
           )}
 
@@ -741,7 +760,7 @@ export function ExpeditionForm() {
                     <button className="text-xs font-bold text-[#3d7048] underline" onClick={() => setStep(0)} type="button">Editar</button>
                   </div>
                   <dl>
-                    <ReviewRow label="Inscrição" value={values.tipoInscricao === 'dupla' ? 'Piloto e acompanhante' : 'Piloto individual'} />
+                    <ReviewRow label="Inscrição" value={values.acompanhantes.length ? `Piloto e ${values.acompanhantes.length} acompanhante(s)` : 'Piloto individual'} />
                     <ReviewRow label="Nome" value={values.nomeCompleto} />
                     <ReviewRow label="CPF" value={values.cpf} />
                     <ReviewRow label="RG" value={values.rg} />
@@ -750,7 +769,7 @@ export function ExpeditionForm() {
                     <ReviewRow label="WhatsApp" value={values.whatsapp} />
                     <ReviewRow label="E-mail" value={values.email} />
                     <ReviewRow label="Endereço" value={address} />
-                    {values.tipoInscricao === 'dupla' && <ReviewRow label="Acompanhante" value={`${values.nomeAcompanhante} · RG ${values.rgAcompanhante} · Camiseta ${values.tamanhoCamisetaAcompanhante}`} />}
+                    {values.acompanhantes.map((companion, index) => <ReviewRow key={companion.id} label={`Acompanhante ${index + 1}`} value={`${companion.nome} · ${companion.dataNascimento} · Camiseta ${companion.tamanhoCamiseta}${companion.rg ? ` · RG ${companion.rg}` : ''}`} />)}
                   </dl>
                 </div>
                 <div className="rounded-2xl border border-[#d9e4db] bg-[#fbfdfb] p-5 sm:p-6">

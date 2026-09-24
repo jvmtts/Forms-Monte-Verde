@@ -1,11 +1,17 @@
 export type Step = 0 | 1 | 2
-export type RegistrationType = '' | 'individual' | 'dupla'
+export interface Companion {
+  id: string
+  nome: string
+  rg: string
+  dataNascimento: string
+  tamanhoCamiseta: string
+}
 export type VehicleMode = '' | 'proprio' | 'locacao'
 export type VehicleType = '' | 'utv' | 'quadriciclo' | '4x4'
 export type RentalPreference = '' | 'utv' | 'quadriciclo' | 'avaliar'
 
 export interface FormValues {
-  tipoInscricao: RegistrationType
+  acompanhantes: Companion[]
   nomeCompleto: string
   cpf: string
   rg: string
@@ -19,10 +25,6 @@ export interface FormValues {
   complemento: string
   cidade: string
   estado: string
-  nomeAcompanhante: string
-  rgAcompanhante: string
-  dataNascimentoAcompanhante: string
-  tamanhoCamisetaAcompanhante: string
   modalidadeVeiculo: VehicleMode
   tipoVeiculo: VehicleType
   marcaVeiculo: string
@@ -39,10 +41,10 @@ export interface FormValues {
   confirmacao: boolean
 }
 
-export type FormErrors = Partial<Record<keyof FormValues, string>>
+export type FormErrors = Record<string, string | undefined>
 
 export const initialValues: FormValues = {
-  tipoInscricao: '',
+  acompanhantes: [],
   nomeCompleto: '',
   cpf: '',
   rg: '',
@@ -56,10 +58,6 @@ export const initialValues: FormValues = {
   complemento: '',
   cidade: '',
   estado: '',
-  nomeAcompanhante: '',
-  rgAcompanhante: '',
-  dataNascimentoAcompanhante: '',
-  tamanhoCamisetaAcompanhante: '',
   modalidadeVeiculo: '',
   tipoVeiculo: '',
   marcaVeiculo: '',
